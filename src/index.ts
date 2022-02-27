@@ -56,18 +56,22 @@ client.on(Constants.Events.MESSAGE_CREATE, async (msg) => {
 
     switch(command) {
         case "schedule": {
-            const [ time, webhook_url ] = args;
+            const [ time ] = args;
             const file = msg.attachments.first();
 
-            if(!webhook_url || !time || !file) {
-                msg.channel.send("Error! You must provide a time, webhook url, and a webhook payload in the form of a file attachment.");
+            if(!time || !file) {
+                msg.channel.send("Error! You must provide a time and a webhook payload in the form of a file attachment.");
                 return void 0;
             }
             const combined_time = Date.now() + parse(time);
             const payload = await fetch(file.url).then(x => x.text());
+            let parsedPayload;
+            let webhook_url;
 
             try { 
-                JSON.parse(payload);
+                const temp = JSON.parse(payload);
+                parsedPayload = temp.backups[0].messages[0].data;
+                webhook_url = temp.backups[0].targets[0].url;
             } catch(e) {
                 msg.channel.send(`That is not valid JSON. Please make sure it looks like
                 \`\`\`json  
@@ -88,7 +92,7 @@ client.on(Constants.Events.MESSAGE_CREATE, async (msg) => {
             try {
                 const created_event = await db.event.create({
                     "data": {
-                        "payload": payload,
+                        "payload": JSON.stringify(parsedPayload),
                         "time": new Date(combined_time),
                         webhook_url
                     }
@@ -96,6 +100,7 @@ client.on(Constants.Events.MESSAGE_CREATE, async (msg) => {
                 msg.channel.send(`Event scheduled. ID: \`${created_event.id}\``);
             } catch(e) {
                 msg.channel.send("There was an error creating this event.");
+                console.log(e);
                 return void 0;
             }
             break;
