@@ -1,5 +1,5 @@
 import { Client, Collection, Constants, WebhookClient } from "discord.js";
-import { PrismaClient } from "@prisma/client";
+import { Event, PrismaClient } from "@prisma/client";
 import fetch from "node-fetch";
 import parse from "parse-duration";
 import "dotenv/config";
@@ -29,20 +29,16 @@ client.on(Constants.Events.CLIENT_READY, () => {
                 "time": {
                     "gte": new Date(),
                     "lte": new Date(Date.now() + 1.8e+6)
-                }
+                },
+                "expired": false
             }
         });
 
         for(const event of events) {
+            if(timeouts.has(event.id) || event.expired) continue;
             const timeout = event.time.getTime() - Date.now();
-            timeouts.set(event.id, setTimeout(async () => {
-                const webhook = new WebhookClient({ "url": event.webhook_url });
-                try {
-                    await webhook.send(JSON.parse(event.payload));
-                    console.log(`Successfully sent webhook ${event.id} by ${event.webhook_url} of content ${event.payload}`)
-                } catch(e) {
-                    console.log(`Failed sending webhook ${event.id} by ${event.webhook_url} of content ${event.payload}`)
-                }
+            timeouts.set(event.id, setTimeout(() => {
+                registerEventForRemoval(event);
             }, timeout < 1 ? 10000 : timeout));
         }
     }
@@ -74,7 +70,7 @@ client.on(Constants.Events.MESSAGE_CREATE, async (msg) => {
                 webhook_url = temp.backups[0].targets[0].url;
             } catch(e) {
                 msg.channel.send(`That is not valid JSON. Please make sure it looks like
-                \`\`\`json  
+                \`\`\`  
                 {
                     content: "This is stuff",
                     embeds: [
@@ -94,10 +90,14 @@ client.on(Constants.Events.MESSAGE_CREATE, async (msg) => {
                     "data": {
                         "payload": JSON.stringify(parsedPayload),
                         "time": new Date(combined_time),
+                        "expired": false,
                         webhook_url
                     }
                 })
                 msg.channel.send(`Event scheduled. ID: \`${created_event.id}\``);
+
+                const time_until_expiration = created_event.time.getTime() - Date.now();
+                if(time_until_expiration <= 1.8e+6) timeouts.set(created_event.id, setTimeout(() => registerEventForRemoval(created_event), time_until_expiration));
             } catch(e) {
                 msg.channel.send("There was an error creating this event.");
                 console.log(e);
@@ -146,6 +146,25 @@ client.on(Constants.Events.MESSAGE_CREATE, async (msg) => {
         default: return void 0;
     }
 });
+
+async function registerEventForRemoval(event: Event) {
+    const webhook = new WebhookClient({ "url": event.webhook_url });
+    try {
+        await webhook.send(JSON.parse(event.payload));
+        console.log(`Successfully sent webhook ${event.id} by ${event.webhook_url} of content ${event.payload}`)
+    } catch(e) {
+        console.log(`Failed sending webhook ${event.id} by ${event.webhook_url} of content ${event.payload}`)
+    } finally {
+        await db.event.update({
+            "where": {
+                "id": event.id
+            },
+            "data": {
+                "expired": true
+            }
+        })
+    }
+}
 
 (() => {
     client.login(process.env.DISCORD_TOKEN);

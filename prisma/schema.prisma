@@ -12,4 +12,5 @@ model Event {
   time DateTime
   payload  String
   webhook_url String
+  expired Boolean
 }
